@@ -65,7 +65,7 @@ sr.purify : $(sr_OBJS)
 
 .PHONY : clean clean-deps dist    
 
-clean:
+clean: clean-deps
 	rm -f *.o *~ core sr *.dump *.tar tags
 
 clean-deps:

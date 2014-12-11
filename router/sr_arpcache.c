@@ -23,7 +23,7 @@ void sr_arpcache_sweepreqs(struct sr_instance *sr) {
 
     while (p_req != NULL) {
 
-        fprintf(stderr, "sr_arpcache_sweepreqs: Sending ARP...\n");
+        fprintf(stderr, "sr_arpcache_sweepreqs: Sending ARP Request...\n");
 
         if (p_req->times_sent >= MAX_ARP_TRIES) {
             /* Give up */

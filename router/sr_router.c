@@ -73,7 +73,11 @@ void sr_fill_eth(uint8_t* buf,
 
   sr_ethernet_hdr_t *ehdr = (sr_ethernet_hdr_t *)buf;
 
-  memcpy(ehdr->ether_dhost, ether_dhost, ETHER_ADDR_LEN);
+  if ( !ether_dhost ) /* Broadcast address */
+    memset(ehdr->ether_dhost, 0xFF, ETHER_ADDR_LEN);
+  else
+    memcpy(ehdr->ether_dhost, ether_dhost, ETHER_ADDR_LEN);
+
   memcpy(ehdr->ether_shost, ether_shost, ETHER_ADDR_LEN);
   ehdr->ether_type = htons(ether_type);
 
@@ -84,21 +88,22 @@ void sr_fill_eth(uint8_t* buf,
 */
 void sr_fill_simple_ip(uint8_t* buf, 
   unsigned short len,
+  uint8_t ttl, 
   uint8_t protocol,
   uint32_t src,
   uint32_t dst) {
 
   sr_ip_hdr_t *iphdr = (sr_ip_hdr_t *)(buf + sizeof(sr_ethernet_hdr_t));
 
-  iphdr->ip_v = 4;    /* IPv4 */
-  iphdr->ip_hl = 5;   /* Header Size with no options */
+  iphdr->ip_v   = 4;    /* IPv4 */
+  iphdr->ip_hl  = 5;   /* Header Size with no options */
 
   iphdr->ip_tos = 0;
   iphdr->ip_len = htons(len + sizeof(sr_ip_hdr_t));
-  iphdr->ip_id = 0;
+  iphdr->ip_id  = 0;
   iphdr->ip_off = htons(0xFFFF & IP_DF);
-  iphdr->ip_ttl = INIT_TTL;
-  iphdr->ip_p = protocol;
+  iphdr->ip_ttl = ttl ? ttl : INIT_TTL;
+  iphdr->ip_p   = protocol;
 
   iphdr->ip_src = src;
   iphdr->ip_dst = dst;
@@ -149,14 +154,20 @@ void sr_send_inetpkt(struct sr_instance* sr,
     return;
   }
 
+  /* Next hop is immediate host */
+  uint32_t nexthop_ip = (nexthop->gw.s_addr ? nexthop->gw.s_addr : iphdr->ip_dst);
+  
   /* ARP Lookup */
-  struct sr_arpentry *arpentry = sr_arpcache_lookup(&sr->cache, nexthop->gw.s_addr);
+  struct sr_arpentry *arpentry = sr_arpcache_lookup(&sr->cache, nexthop_ip);
 
   if (arpentry == NULL) {
     /* No ARP entry found in cache, request one & queue packet */
     fprintf(stderr, "sr_send_inetpkt: No ARP entry found in cache, queuing packet.\n");
+
     struct sr_arpreq *arpreq = sr_arpcache_queuereq(
-      &sr->cache, nexthop->gw.s_addr, pkt, len, nexthop->interface);
+      &sr->cache, 
+      nexthop_ip, 
+      pkt, len, nexthop->interface);
 
     /* Send ARP request if not already sent */
     if (arpreq->sent == 0) {
@@ -171,13 +182,13 @@ void sr_send_inetpkt(struct sr_instance* sr,
   struct sr_if* iface_nexthop = sr_get_interface(sr, nexthop->interface);
   assert(iface_nexthop);
 
-  /* Send frame to next hop */
-  fprintf(stderr, "sr_send_inetpkt: Ready to send frame.\n");
-
   sr_fill_eth(pkt, (uint8_t *)arpentry->mac, 
     (uint8_t *)iface_nexthop->addr, ethertype_ip);
 
   free(arpentry);
+
+  /* Send frame to next hop */
+  fprintf(stderr, "sr_send_inetpkt: Ready to send frame.\n");
   
   /* Send INet Packet */
   sr_send_packet(sr, pkt, len, iface_nexthop->name);
@@ -231,7 +242,7 @@ void sr_send_icmp(struct sr_instance* sr,
     icmp_t3_hdr->icmp_sum = cksum(icmp_t3_hdr, sizeof(sr_icmp_t3_hdr_t));
   }
 
-  sr_fill_simple_ip(pktbuf, payload_len, 
+  sr_fill_simple_ip(pktbuf, payload_len, iphdr->ip_ttl, 
     ip_protocol_icmp, iface->ip, iphdr->ip_src);
   sr_send_inetpkt(sr, pktbuf, hdr_len + payload_len, iface);
 
@@ -283,9 +294,8 @@ void sr_send_arpreq(struct sr_instance *sr, uint32_t ip, struct sr_if* iface) {
 
     const int pktlen = sizeof(sr_ethernet_hdr_t) + sizeof(sr_arp_hdr_t);
     uint8_t* pktbuf = calloc(1, pktlen);
-    uint8_t broadcast[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 
-    sr_fill_eth(pktbuf, broadcast, iface->addr, ethertype_arp);
+    sr_fill_eth(pktbuf, NULL, iface->addr, ethertype_arp);
 
     /* Fill ARP Request */
     sr_arp_hdr_t *arp_hdr = (sr_arp_hdr_t *)(pktbuf + sizeof(sr_ethernet_hdr_t));
