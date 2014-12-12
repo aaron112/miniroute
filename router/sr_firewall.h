@@ -1,5 +1,6 @@
 
-#define SR_FIREWALL_ENABLED
+/* Comment out the below line to disable firewall entirely */
+/* #define SR_FIREWALL_ENABLED */
 
 #ifndef SR_FIREWALL_H
 #define SR_FIREWALL_H
