@@ -197,6 +197,26 @@ typedef struct sr_arp_hdr sr_arp_hdr_t;
 
 
 
+struct sr_tcp_pseudohdr {
+  uint32_t ip_src;
+  uint32_t ip_dst;
+  uint8_t  reserved;
+  uint8_t  protocol;
+  uint16_t tcp_length;
+
+} __attribute__ ((packed)) ;
+typedef struct sr_tcp_pseudohdr sr_tcp_pseudohdr_t;
+
+struct sr_udp_pseudohdr {
+  uint32_t ip_src;
+  uint32_t ip_dst;
+  uint8_t  reserved;
+  uint8_t  protocol;
+  uint16_t udp_length;
+
+} __attribute__ ((packed)) ;
+typedef struct sr_udp_pseudohdr sr_udp_pseudohdr_t;
+
 
 struct sr_tcp_hdr {
   uint16_t src_port;

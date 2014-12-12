@@ -72,7 +72,7 @@ int parse_ip_block(char* sp, uint32_t* addr, uint32_t* mask) {
         }
         cidr = 32 - cidr;
 
-        *mask = (0xFFFFFFFF >> cidr) << cidr;
+        *mask = htonl((0xFFFFFFFF >> cidr) << cidr);
     }
 
     return 1;
@@ -197,8 +197,8 @@ void sr_print_fw_rule(sr_fw_rule_t *rule) {
 
     printf("FW Rule: action=%d, protocol=%d, direction=%d, src_addr=0x%x, src_mask=0x%x, src_port=%d, dst_addr=0x%x, dst_mask=0x%x, dst_port=%d\n",
         rule->action, rule->protocol, rule->direction, 
-        rule->src_addr, rule->src_mask, rule->src_port, 
-        rule->dst_addr, rule->dst_mask, rule->dst_port);
+        ntohl(rule->src_addr), ntohl(rule->src_mask), rule->src_port, 
+        ntohl(rule->dst_addr), ntohl(rule->dst_mask), rule->dst_port);
 
 }
 
@@ -267,6 +267,55 @@ int sr_load_fw(struct sr_fw* fw, const char* filename) {
 #define sr_match_bothdir(src, srcport, dst, dstport, src2, src2port, dst2, dst2port) ( (src==src2 && srcport==src2port && dst==dst2 && dstport==dst2port) || (src==dst2 && srcport==dst2port && dst==src2 && dstport==src2port) )
 
 
+int sr_tcp_checksum(uint8_t * packet /* lent */,
+    unsigned int len) {
+
+    const int pseudo_pkt_len = sizeof(sr_tcp_pseudohdr_t) + 
+        len - sizeof(sr_ethernet_hdr_t) - sizeof(sr_ip_hdr_t);
+    uint8_t pseudo_pkt[pseudo_pkt_len];
+
+    sr_ip_hdr_t *iphdr = (sr_ip_hdr_t *)(packet + sizeof(sr_ethernet_hdr_t));
+
+    sr_tcp_pseudohdr_t *phdr = (sr_tcp_pseudohdr_t *) pseudo_pkt;
+    /* Fill in pseudo header for CRC calculation */
+    phdr->ip_src = iphdr->ip_src;
+    phdr->ip_dst = iphdr->ip_dst;
+    phdr->reserved = 0;
+    phdr->protocol = iphdr->ip_p;
+    phdr->tcp_length = htons(len - sizeof(sr_ethernet_hdr_t) - sizeof(sr_ip_hdr_t));
+
+    uint8_t *pdata_begin = pseudo_pkt + sizeof(sr_tcp_pseudohdr_t);
+    uint8_t *data_begin = (uint8_t*)iphdr + sizeof(sr_ip_hdr_t);
+    memcpy(pdata_begin, data_begin, ntohs(phdr->tcp_length));
+
+    return cksum(pseudo_pkt, pseudo_pkt_len);
+}
+
+int sr_udp_checksum(uint8_t * packet /* lent */,
+    unsigned int len) {
+
+    const int pseudo_pkt_len = sizeof(sr_udp_pseudohdr_t) + 
+        len - sizeof(sr_ethernet_hdr_t) - sizeof(sr_ip_hdr_t);
+    uint8_t pseudo_pkt[pseudo_pkt_len];
+
+    sr_ip_hdr_t *iphdr = (sr_ip_hdr_t *)(packet + sizeof(sr_ethernet_hdr_t));
+    sr_udp_hdr_t *udphdr = (sr_udp_hdr_t *)((uint8_t*)iphdr + sizeof(sr_ip_hdr_t));
+
+    sr_tcp_pseudohdr_t *phdr = (sr_tcp_pseudohdr_t *) pseudo_pkt;
+    /* Fill in pseudo header for CRC calculation */
+    phdr->ip_src = iphdr->ip_src;
+    phdr->ip_dst = iphdr->ip_dst;
+    phdr->reserved = 0;
+    phdr->protocol = iphdr->ip_p;
+    phdr->tcp_length = udphdr->length;
+
+    uint8_t *pdata_begin = pseudo_pkt + sizeof(sr_udp_pseudohdr_t);
+    uint8_t *data_begin = (uint8_t*)iphdr + sizeof(sr_ip_hdr_t);
+    memcpy(pdata_begin, data_begin, ntohs(udphdr->length));
+
+    return cksum(pseudo_pkt, pseudo_pkt_len);
+}
+
 int sr_get_ports(uint8_t * packet /* lent */,
     unsigned int len,
     uint16_t *src_port,
@@ -288,22 +337,26 @@ int sr_get_ports(uint8_t * packet /* lent */,
             return 0;
         }
         
-        /*
-        if (cksum(tcphdr, sizeof(sr_tcp_hdr_t)) != 0xFFFF) {
+        if ( sr_tcp_checksum(packet, len) != 0xFFFF ) {
             fprintf(stderr, "sr_fw_match_connections: Incorrect TCP Header Checksum.\n");
             return 0;
         }
-        */
 
         *src_port = ntohs(tcphdr->src_port);
         *dst_port = ntohs(tcphdr->dst_port);
         break;
 
     case UDP:
-        if (cksum(udphdr, sizeof(sr_udp_hdr_t)) != 0xFFFF) {
+        if ( len < (sizeof(sr_udp_hdr_t)+sizeof(sr_ip_hdr_t)+sizeof(sr_ethernet_hdr_t)) ) {
+            fprintf(stderr, "sr_get_ports: Malformed UDP Header.\n");
+            return 0;
+        }
+
+        if ( sr_udp_checksum(packet, len) != 0xFFFF ) {
             fprintf(stderr, "sr_get_ports: Incorrect UDP Header Checksum.\n");
             return 0;
         }
+
         *src_port = ntohs(udphdr->src_port);
         *dst_port = ntohs(udphdr->dst_port);
         break;
@@ -419,13 +472,13 @@ int sr_fw_match(sr_fw_rule_t * rule, /* lent */
         return 0;
 
     /* Check source */
-    fprintf(stderr, "sr_fw_match: 0x%x 0x%x 0x%x\n", ip_src, rule->src_addr, rule->src_mask);
+    fprintf(stderr, "sr_fw_match: 0x%x 0x%x 0x%x\n", ntohl(ip_src), ntohl(rule->src_addr), ntohl(rule->src_mask));
     if ( !sr_match_netblock(ip_src, rule->src_addr, rule->src_mask) )
         return 0;
 
     fprintf(stderr, "sr_fw_match: Src IP Matched.\n");
 
-    fprintf(stderr, "sr_fw_match: 0x%x 0x%x 0x%x\n", ip_dst, rule->dst_addr, rule->dst_mask);
+    fprintf(stderr, "sr_fw_match: 0x%x 0x%x 0x%x\n", ntohl(ip_dst), ntohl(rule->dst_addr), ntohl(rule->dst_mask));
 
     /* Check dest */
     if ( !sr_match_netblock(ip_dst, rule->dst_addr, rule->dst_mask) )
