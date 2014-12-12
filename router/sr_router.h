@@ -13,6 +13,7 @@
 #include <sys/time.h>
 #include <stdio.h>
 
+#include "sr_firewall.h"
 #include "sr_protocol.h"
 #include "sr_arpcache.h"
 
@@ -53,6 +54,11 @@ struct sr_instance
     struct sr_if* if_list; /* list of interfaces */
     struct sr_rt* routing_table; /* routing table */
     struct sr_arpcache cache;   /* ARP cache */
+
+#ifdef SR_FIREWALL_ENABLED
+    struct sr_fw  fw;
+#endif
+
     pthread_attr_t attr;
     FILE* logfile;
 };

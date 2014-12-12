@@ -119,26 +119,26 @@ typedef struct sr_icmp_t3_hdr sr_icmp_t3_hdr_t;
 struct sr_ip_hdr
   {
 #if __BYTE_ORDER == __LITTLE_ENDIAN
-    unsigned int ip_hl:4;		/* header length */
-    unsigned int ip_v:4;		/* version */
+    unsigned int ip_hl:4;   /* header length */
+    unsigned int ip_v:4;    /* version */
 #elif __BYTE_ORDER == __BIG_ENDIAN
-    unsigned int ip_v:4;		/* version */
-    unsigned int ip_hl:4;		/* header length */
+    unsigned int ip_v:4;    /* version */
+    unsigned int ip_hl:4;   /* header length */
 #else
 #error "Byte ordering ot specified " 
 #endif 
-    uint8_t ip_tos;			/* type of service */
-    uint16_t ip_len;			/* total length */
-    uint16_t ip_id;			/* identification */
-    uint16_t ip_off;			/* fragment offset field */
-#define	IP_RF 0x8000			/* reserved fragment flag */
-#define	IP_DF 0x4000			/* dont fragment flag */
-#define	IP_MF 0x2000			/* more fragments flag */
-#define	IP_OFFMASK 0x1fff		/* mask for fragmenting bits */
-    uint8_t ip_ttl;			/* time to live */
-    uint8_t ip_p;			/* protocol */
-    uint16_t ip_sum;			/* checksum */
-    uint32_t ip_src, ip_dst;	/* source and dest address */
+    uint8_t ip_tos;     /* type of service */
+    uint16_t ip_len;      /* total length */
+    uint16_t ip_id;     /* identification */
+    uint16_t ip_off;      /* fragment offset field */
+#define IP_RF 0x8000      /* reserved fragment flag */
+#define IP_DF 0x4000      /* dont fragment flag */
+#define IP_MF 0x2000      /* more fragments flag */
+#define IP_OFFMASK 0x1fff   /* mask for fragmenting bits */
+    uint8_t ip_ttl;     /* time to live */
+    uint8_t ip_p;     /* protocol */
+    uint16_t ip_sum;      /* checksum */
+    uint32_t ip_src, ip_dst;  /* source and dest address */
   } __attribute__ ((packed)) ;
 typedef struct sr_ip_hdr sr_ip_hdr_t;
 
@@ -194,5 +194,30 @@ struct sr_arp_hdr
 typedef struct sr_arp_hdr sr_arp_hdr_t;
 
 #define sr_IFACE_NAMELEN 32
+
+
+
+
+struct sr_tcp_hdr {
+  uint16_t src_port;
+  uint16_t dst_port;
+  uint32_t seq;
+  uint32_t ack;
+  uint8_t  data_offset;  /* 4 bits */
+  uint8_t  flags;
+  uint16_t window_size;
+  uint16_t checksum;
+  uint16_t urgent_p;
+}  __attribute__ ((packed)) ;
+typedef struct sr_tcp_hdr sr_tcp_hdr_t;
+
+
+struct sr_udp_hdr {
+  uint16_t src_port;
+  uint16_t dst_port;
+  uint16_t length;
+  uint16_t checksum;
+}  __attribute__ ((packed)) ;
+typedef struct sr_udp_hdr sr_udp_hdr_t;
 
 #endif /* -- SR_PROTOCOL_H -- */

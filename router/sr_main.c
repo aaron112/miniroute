@@ -29,6 +29,7 @@
 #include <getopt.h>
 #endif /* _LINUX_ */
 
+#include "sr_firewall.h"
 #include "sr_dumper.h"
 #include "sr_router.h"
 #include "sr_rt.h"
@@ -156,6 +157,10 @@ int main(int argc, char **argv)
       sr_load_rt_wrap(&sr, rtable);
     }
 
+#ifdef SR_FIREWALL_ENABLED
+    sr_load_fw(&(sr.fw), "fw_rules");
+#endif
+
     /* call router init (for arp subsystem etc.) */
     sr_init(&sr);
 
@@ -249,6 +254,10 @@ static void sr_init_instance(struct sr_instance* sr)
     sr->if_list = 0;
     sr->routing_table = 0;
     sr->logfile = 0;
+
+#ifdef SR_FIREWALL_ENABLED
+    sr_init_fw(&(sr->fw));
+#endif
 } /* -- sr_init_instance -- */
 
 /*-----------------------------------------------------------------------------

@@ -469,6 +469,15 @@ void sr_handleip(struct sr_instance* sr,
     return;
   }
 
+#ifdef SR_FIREWALL_ENABLED
+
+  if ( sr_fw_inspect(&(sr->fw), packet, len) == DENY ) {
+    fprintf(stderr, "sr_handleip: Packet denied by firewall, dropped.\n");
+    return;
+  }
+
+#endif
+
   /* Check if this is for me:
      Try to assoicate ip_dst to one of our interfaces */
   struct sr_if* dst_iface = sr_find_iface(sr, iphdr->ip_dst);

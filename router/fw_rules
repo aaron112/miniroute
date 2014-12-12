@@ -1,0 +1,2 @@
+deny tcp from 152.140.2.2/32 to any 22 out
+allow tcp from any to any
