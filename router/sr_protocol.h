@@ -224,6 +224,9 @@ struct sr_tcp_hdr {
   uint32_t seq;
   uint32_t ack;
   uint8_t  data_offset;  /* 4 bits */
+#define MASK_ACK 0x10
+#define MASK_FIN 0x01
+#define MASK_FINACK 0x11
   uint8_t  flags;
   uint16_t window_size;
   uint16_t checksum;

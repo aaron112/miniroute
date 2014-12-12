@@ -177,7 +177,7 @@ int sr_parse_fw_rule(char* line, sr_fw_rule_t* rule) {
         return 0;
 
     /* [<optional direction>] */
-    if (strncmp(sp, DIR_IN, 3) == 0)  /* allow */
+    if (strncmp(sp, DIR_IN, 3) == 0)
         rule->direction = IN;
 
     else if (strncmp(sp, DIR_OUT, 3) == 0)
@@ -316,24 +316,36 @@ int sr_udp_checksum(uint8_t * packet /* lent */,
     return cksum(pseudo_pkt, pseudo_pkt_len);
 }
 
-int sr_get_ports(uint8_t * packet /* lent */,
+/*
+    Util function to extract src&dst ports from UDP/TCP packets,
+    also verifies CRC checksum.
+
+    ** tcp_seq_out, tcp_ack_out & tcp_flags_out only sets if the given packet is TCP.
+*/
+int sr_get_transport_details(uint8_t * packet /* lent */,
     unsigned int len,
-    uint16_t *src_port,
-    uint16_t *dst_port
+    uint16_t *src_port_out,
+    uint16_t *dst_port_out,
+    uint8_t  *ip_proto_out,
+    uint32_t *tcp_seq_out,
+    uint32_t *tcp_ack_out,
+    uint8_t  *tcp_flags_out
     ) {
 
     sr_ip_hdr_t *iphdr = (sr_ip_hdr_t *)(packet + sizeof(sr_ethernet_hdr_t));
     sr_tcp_hdr_t *tcphdr = (sr_tcp_hdr_t *)(packet + sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t));
     sr_udp_hdr_t *udphdr = (sr_udp_hdr_t *)(tcphdr);
 
+    *ip_proto_out = iphdr->ip_p;
+
     switch ((sr_ip_protocol)iphdr->ip_p) {
     case ICMP:
-        *src_port = *dst_port = 0;
+        *src_port_out = *dst_port_out = 0;
         break;
 
     case TCP:
         if ( len < (sizeof(sr_tcp_hdr_t)+sizeof(sr_ip_hdr_t)+sizeof(sr_ethernet_hdr_t)) ) {
-            fprintf(stderr, "sr_get_ports: Malformed TCP Header.\n");
+            fprintf(stderr, "sr_get_transport_details: Malformed TCP Header.\n");
             return 0;
         }
         
@@ -342,34 +354,37 @@ int sr_get_ports(uint8_t * packet /* lent */,
             return 0;
         }
 
-        *src_port = ntohs(tcphdr->src_port);
-        *dst_port = ntohs(tcphdr->dst_port);
+        *src_port_out = ntohs(tcphdr->src_port);
+        *dst_port_out = ntohs(tcphdr->dst_port);
+        *tcp_seq_out = ntohl(tcphdr->seq);
+        *tcp_ack_out = ntohl(tcphdr->ack);
+        *tcp_flags_out = tcphdr->flags;
         break;
 
     case UDP:
         if ( len < (sizeof(sr_udp_hdr_t)+sizeof(sr_ip_hdr_t)+sizeof(sr_ethernet_hdr_t)) ) {
-            fprintf(stderr, "sr_get_ports: Malformed UDP Header.\n");
+            fprintf(stderr, "sr_get_transport_details: Malformed UDP Header.\n");
             return 0;
         }
 
         if ( sr_udp_checksum(packet, len) != 0xFFFF ) {
-            fprintf(stderr, "sr_get_ports: Incorrect UDP Header Checksum.\n");
+            fprintf(stderr, "sr_get_transport_details: Incorrect UDP Header Checksum.\n");
             return 0;
         }
 
-        *src_port = ntohs(udphdr->src_port);
-        *dst_port = ntohs(udphdr->dst_port);
+        *src_port_out = ntohs(udphdr->src_port);
+        *dst_port_out = ntohs(udphdr->dst_port);
         break;
     }
 
-    fprintf(stderr, "sr_get_ports: src_port=%d, dst_port=%d\n", *src_port, *dst_port);
+    fprintf(stderr, "sr_get_transport_details: src_port=%d, dst_port=%d\n", *src_port_out, *dst_port_out);
 
     return 1;
 }
 
 /**
     Match packet with current connections.
-    Also remove connection extries if exprired, or
+    Also remove connection entries if exprired, or
     update last seen time if matched.
 
     Returns 1 if match found, 0 otherwise.
@@ -379,7 +394,10 @@ int sr_fw_match_connections(struct sr_fw * fw,
     uint32_t ip_src,
     uint32_t ip_dst,
     uint16_t src_port,
-    uint16_t dst_port) {
+    uint16_t dst_port,
+    uint32_t tcp_seq,
+    uint32_t tcp_ack,
+    uint8_t tcp_flags) {
 
     sr_connection_t *conn = fw->connections;
     if (conn == NULL)
@@ -413,10 +431,35 @@ int sr_fw_match_connections(struct sr_fw * fw,
         if ( conn->protocol == protocol 
             && sr_match_bothdir(ip_src, src_port, ip_dst, dst_port, 
             conn->src_addr, conn->src_port, conn->dst_addr, conn->dst_port) ) {
-            
+            /*
+            printf("sr_fw_match_connections: TCP Flags: ack=%x, fin=%x\n", (tcp_flags & MASK_ACK), (tcp_flags & MASK_FIN));
+            printf("sr_fw_match_connections: TCP Flags: conn->last_fin_ack=%x, tcp_ack=%x\n", conn->last_fin_ack, tcp_ack);
+            */
+            if ( (tcp_flags & MASK_ACK) && !(tcp_flags & MASK_FIN) && 
+                conn->last_fin_ack == tcp_ack-1 ) {
+                /* ACK = 1, FIN = 0, Ack = last FIN+ACK */
+                /* TCP FIN Detected: Remove connection */
+                printf("sr_fw_match_connections: TCP FIN detected, remove connection and allow.\n");
+                if (prev == NULL)
+                    fw->connections = conn->next;
+                else
+                    prev->next = conn->next;
+
+                free(conn);
+
+                return 1;   /* Let this packet thorugh */
+            }
+
+            /* Record FIN+ACK seq for later use */
+            if ( tcp_flags & MASK_FINACK == MASK_FINACK ) {
+                printf("sr_fw_match_connections: TCP FIN+ACK detected.\n");
+                conn->last_fin_ack = tcp_seq;
+            }
+
             /*  We have a match - 
-                Update last seen, move to front then return */
+                Update last seen */
             conn->last_seen = currtime;
+            /*  Move to front then return */
 
             if (prev != NULL) {
                 prev->next = conn->next;
@@ -449,6 +492,7 @@ void sr_fw_add_connection(struct sr_fw * fw,
     new_conn->src_port  = src_port;
     new_conn->dst_addr  = ip_dst;
     new_conn->dst_port  = dst_port;
+    new_conn->last_fin_ack = 0;
     new_conn->last_seen = time(NULL);
 
     new_conn->next      = fw->connections;
@@ -518,12 +562,17 @@ sr_fw_action sr_fw_inspect(struct sr_fw* fw,
 
     uint16_t src_port;
     uint16_t dst_port;
+    uint8_t  ip_proto;
+    uint32_t tcp_seq;
+    uint32_t tcp_ack;
+    uint8_t  tcp_flags = 0;
 
     printf("sr_fw_inspect: begin\n");
 
     /* Attempt to get port from TCP/UDP Header, 
        also checks TCP/UDP Header checksum */
-    if ( !sr_get_ports(packet, len, &src_port, &dst_port) )
+    if ( !sr_get_transport_details(packet, len, 
+        &src_port, &dst_port, &ip_proto, &tcp_seq, &tcp_ack, &tcp_flags) )
         return DENY;   /* Unrecognized protocol - DENY */
 
 
@@ -531,7 +580,7 @@ sr_fw_action sr_fw_inspect(struct sr_fw* fw,
 
     /* Match current connections */
     if ( sr_fw_match_connections(fw, protocol, 
-        ip_src, ip_dst, src_port, dst_port) )
+        ip_src, ip_dst, src_port, dst_port, tcp_seq, tcp_ack, tcp_flags) )
         return ALLOW;   /* Matched with current connection - ALLOWED */
 
         printf("sr_fw_inspect: Not matched with current connections.\n");
@@ -558,8 +607,8 @@ sr_fw_action sr_fw_inspect(struct sr_fw* fw,
 
     printf("sr_fw_inspect: Not matched with any rules.\n");
 
-    /* No matching rule: Assume pass? */
-    return ALLOW;
+    /* No matching rule: Assume DENY? */
+    return DENY;
 }
 
 #endif

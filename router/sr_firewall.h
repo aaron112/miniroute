@@ -38,6 +38,8 @@ typedef struct sr_connection {
   uint32_t  dst_addr;
   uint16_t  dst_port;
 
+  uint32_t  last_fin_ack;
+
   time_t    last_seen;
 
   struct sr_connection *next;
