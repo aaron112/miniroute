@@ -139,7 +139,8 @@ struct sr_rt* sr_findroute(struct sr_instance* sr,
 void sr_send_inetpkt(struct sr_instance* sr,
         uint8_t * pkt/* lent */,
         unsigned int len,
-        struct sr_if* src_iface/* lent */) {
+        struct sr_if* src_iface/* lent */,
+        int inited_by_router) {
 
   sr_ip_hdr_t *iphdr = (sr_ip_hdr_t *)(pkt + sizeof(sr_ethernet_hdr_t));
 
@@ -149,6 +150,9 @@ void sr_send_inetpkt(struct sr_instance* sr,
   if (nexthop == NULL) {
     /* No route found */
     fprintf(stderr, "sr_send_inetpkt: No route found!\n");
+    if (inited_by_router)
+      return;
+
     sr_send_icmp(sr, pkt, len, src_iface, 
       ICMP_TYPE_UNREACHABLE, ICMP_UNREACHABLE_NET);
     return;
@@ -244,7 +248,7 @@ void sr_send_icmp(struct sr_instance* sr,
 
   sr_fill_simple_ip(pktbuf, payload_len, iphdr->ip_ttl, 
     ip_protocol_icmp, iface->ip, iphdr->ip_src);
-  sr_send_inetpkt(sr, pktbuf, hdr_len + payload_len, iface);
+  sr_send_inetpkt(sr, pktbuf, hdr_len + payload_len, iface, 1);
 
   free(pktbuf);
 }
@@ -283,7 +287,7 @@ void sr_forwardpkt(struct sr_instance* sr,
   iphdr->ip_sum = 0x0;
   iphdr->ip_sum = cksum((void*)iphdr, sizeof(sr_ip_hdr_t));
 
-  sr_send_inetpkt(sr, outpkt, len, iface);
+  sr_send_inetpkt(sr, outpkt, len, iface, 0);
 
   free(outpkt);
 }
@@ -403,7 +407,7 @@ void sr_handlearp(struct sr_instance* sr,
       /* Send out queued packet */
       struct sr_if* iface_s = sr_get_interface(sr, p_pkt->iface);
       assert(iface_s);
-      sr_send_inetpkt(sr, p_pkt->buf, p_pkt->len, iface_s);
+      sr_send_inetpkt(sr, p_pkt->buf, p_pkt->len, iface_s, 0);
 
       pktq = pktq->next;
       free(p_pkt);
