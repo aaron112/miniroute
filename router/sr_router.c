@@ -328,7 +328,7 @@ void sr_send_arpreply(struct sr_instance* sr,
   struct sr_if* iface) {
 
   const int pktlen = sizeof(sr_ethernet_hdr_t) + sizeof(sr_arp_hdr_t);
-  uint8_t* pktbuf = calloc(1, pktlen);
+  uint8_t pktbuf[pktlen];
 
   sr_fill_eth(pktbuf, arp_req->ar_sha, iface->addr, ethertype_arp);
 
@@ -350,8 +350,6 @@ void sr_send_arpreply(struct sr_instance* sr,
 
   /* Send ARP Reply */
   sr_send_packet(sr, pktbuf, pktlen, iface->name);
-
-  free(pktbuf);
 }
 
 void sr_handlearp(struct sr_instance* sr,
